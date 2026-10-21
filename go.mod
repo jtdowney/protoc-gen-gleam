@@ -1,4 +1,4 @@
-module github.com/qwexvf/protoc-gen-gleam
+module github.com/jtdowney/protoc-gen-gleam
 
 go 1.26.2
 

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	gleamfmt "github.com/qwexvf/protoc-gen-gleam/internal/gleam"
+	gleamfmt "github.com/jtdowney/protoc-gen-gleam/internal/gleam"
 	"google.golang.org/protobuf/compiler/protogen"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )

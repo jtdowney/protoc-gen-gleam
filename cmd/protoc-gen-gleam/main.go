@@ -3,7 +3,7 @@
 //
 // Install:
 //
-//	go install github.com/qwexvf/protoc-gen-gleam/cmd/protoc-gen-gleam@latest
+//	go install github.com/jtdowney/protoc-gen-gleam/cmd/protoc-gen-gleam@latest
 //
 // Usage with buf (buf.gen.yaml):
 //
@@ -20,7 +20,7 @@ import (
 	"os"
 	"path"
 
-	"github.com/qwexvf/protoc-gen-gleam/internal/generator"
+	"github.com/jtdowney/protoc-gen-gleam/internal/generator"
 	"google.golang.org/protobuf/compiler/protogen"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/descriptorpb"

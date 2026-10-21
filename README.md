@@ -63,7 +63,7 @@ Fields typed as `google.protobuf.*` are automatically mapped to pre-built types 
 ## Install
 
 ```sh
-go install github.com/qwexvf/protoc-gen-gleam/cmd/protoc-gen-gleam@latest
+go install github.com/jtdowney/protoc-gen-gleam/cmd/protoc-gen-gleam@latest
 ```
 
 ## Usage

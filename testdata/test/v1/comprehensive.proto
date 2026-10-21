@@ -3,7 +3,7 @@ syntax = "proto3";
 
 package test.v1;
 
-option go_package = "github.com/qwexvf/protoc-gen-gleam/testdata/testpb;testpb";
+option go_package = "github.com/jtdowney/protoc-gen-gleam/testdata/testpb;testpb";
 
 // --- Enums ---------------------------------------------------------------
 

@@ -2,7 +2,7 @@ name = "gleam_protobuf"
 version = "0.1.0"
 description = "Runtime library for protoc-gen-gleam — proto3 wire-format encode/decode primitives for Gleam."
 licences = ["MIT"]
-repository = { type = "github", user = "qwexvf", repo = "protoc-gen-gleam" }
+repository = { type = "github", user = "jtdowney", repo = "protoc-gen-gleam" }
 
 [dependencies]
 gleam_stdlib = ">= 0.44.0 and < 2.0.0"
