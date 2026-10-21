@@ -206,7 +206,7 @@ func generateMessage(ctx *genContext, msg *protogen.Message) error {
 
 	// Generate oneof sum types.
 	for _, oo := range oneofs {
-		generateOneofType(ctx, oo)
+		generateOneofType(ctx, oo, typeName)
 	}
 
 	// Message record type.
@@ -223,7 +223,7 @@ func generateMessage(ctx *genContext, msg *protogen.Message) error {
 			fields = append(fields, fmt.Sprintf("    %s: %s", gleamfmt.FieldName(string(f.Desc.Name())), gleamFieldType(ctx, f)))
 		}
 		for _, oo := range oneofs {
-			fields = append(fields, fmt.Sprintf("    %s: %s", gleamfmt.FieldName(string(oo.Desc.Name())), gleamfmt.ToPascalCase(string(oo.Desc.Name()))))
+			fields = append(fields, fmt.Sprintf("    %s: %s", gleamfmt.FieldName(string(oo.Desc.Name())), oneofTypeName(typeName, oo)))
 		}
 		ctx.w.P("%s,", strings.Join(fields, ",\n"))
 		ctx.w.P("  )")
@@ -354,11 +354,10 @@ func collectOneofs(msg *protogen.Message) []oneofInfo {
 	return result
 }
 
-func generateOneofType(ctx *genContext, oo oneofInfo) {
-	typeName := gleamfmt.ToPascalCase(string(oo.Desc.Name()))
-	ctx.w.P("pub type %s {", typeName)
+func generateOneofType(ctx *genContext, oo oneofInfo, parentTypeName string) {
+	ctx.w.P("pub type %s {", oneofTypeName(parentTypeName, oo))
 	for _, f := range oo.Fields {
-		variantName := gleamfmt.OneofVariantName(string(f.Desc.Name()))
+		variantName := oneofVariantName(parentTypeName, oo, f)
 		variantType := oneofVariantType(ctx, f)
 		ctx.w.P("  %s(%s)", variantName, variantType)
 	}
@@ -459,6 +458,24 @@ func generateFieldConstants(w *writer, msg *protogen.Message, typeName string) {
 // oneofConstName returns the constant name for a oneof field, scoped by message.
 func oneofConstName(typeName string, f *protogen.Field) string {
 	return "oneof_" + gleamfmt.ToSnakeCase(typeName) + "_" + string(f.Desc.Name())
+}
+
+// oneofTypeName names a oneof's sum type after its message so two messages
+// with the same oneof name don't collide. E.g. Envelope.payload -> EnvelopePayload.
+func oneofTypeName(parentTypeName string, oo oneofInfo) string {
+	return parentTypeName + gleamfmt.ToPascalCase(string(oo.Desc.Name()))
+}
+
+// oneofVariantName prefixes a variant with its oneof type so it can't collide
+// with a message of the same name. E.g. Envelope.payload.started ->
+// EnvelopePayloadStarted.
+func oneofVariantName(parentTypeName string, oo oneofInfo, f *protogen.Field) string {
+	return oneofTypeName(parentTypeName, oo) + gleamfmt.ToPascalCase(string(f.Desc.Name()))
+}
+
+// oneofEncoderName is the private encoder for a oneof's sum type.
+func oneofEncoderName(parentTypeName string, oo oneofInfo) string {
+	return "encode_" + gleamfmt.ToSnakeCase(oneofTypeName(parentTypeName, oo))
 }
 
 // writer wraps a generated file for convenient line-oriented output.

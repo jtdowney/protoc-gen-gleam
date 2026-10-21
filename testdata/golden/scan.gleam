@@ -128,15 +128,15 @@ pub fn log_level_to_string(v: LogLevel) -> String {
   }
 }
 
-pub type Payload {
-  StartCommand(ScanStartCommand)
-  CancelCommand(ScanCancelCommand)
-  Started(ScanStartedEvent)
-  Progress(ScanProgressEvent)
-  Finding(ScanFindingEvent)
-  Log(ScanLogEvent)
-  Completed(ScanCompletedEvent)
-  Failed(ScanFailedEvent)
+pub type EnvelopePayload {
+  EnvelopePayloadStartCommand(ScanStartCommand)
+  EnvelopePayloadCancelCommand(ScanCancelCommand)
+  EnvelopePayloadStarted(ScanStartedEvent)
+  EnvelopePayloadProgress(ScanProgressEvent)
+  EnvelopePayloadFinding(ScanFindingEvent)
+  EnvelopePayloadLog(ScanLogEvent)
+  EnvelopePayloadCompleted(ScanCompletedEvent)
+  EnvelopePayloadFailed(ScanFailedEvent)
 }
 
 pub type Envelope {
@@ -145,7 +145,7 @@ pub type Envelope {
     event_id: String,
     scan_id: String,
     timestamp_ms: Int,
-    payload: Payload,
+    payload: EnvelopePayload,
   )
 }
 
@@ -169,20 +169,20 @@ pub fn encode_envelope(msg: Envelope) -> BitArray {
     wire.encode_string_field(field_envelope_event_id, event_id):bits,
     wire.encode_string_field(field_envelope_scan_id, scan_id):bits,
     wire.encode_int_field(field_envelope_timestamp_ms, timestamp_ms):bits,
-    encode_payload_payload(payload):bits,
+    encode_envelope_payload(payload):bits,
   >>
 }
 
-fn encode_payload_payload(p: Payload) -> BitArray {
+fn encode_envelope_payload(p: EnvelopePayload) -> BitArray {
   case p {
-    StartCommand(m) -> wire.encode_message_field_always(oneof_envelope_start_command, encode_scan_start_command(m))
-    CancelCommand(m) -> wire.encode_message_field_always(oneof_envelope_cancel_command, encode_scan_cancel_command(m))
-    Started(m) -> wire.encode_message_field_always(oneof_envelope_started, encode_scan_started_event(m))
-    Progress(m) -> wire.encode_message_field_always(oneof_envelope_progress, encode_scan_progress_event(m))
-    Finding(m) -> wire.encode_message_field_always(oneof_envelope_finding, encode_scan_finding_event(m))
-    Log(m) -> wire.encode_message_field_always(oneof_envelope_log, encode_scan_log_event(m))
-    Completed(m) -> wire.encode_message_field_always(oneof_envelope_completed, encode_scan_completed_event(m))
-    Failed(m) -> wire.encode_message_field_always(oneof_envelope_failed, encode_scan_failed_event(m))
+    EnvelopePayloadStartCommand(m) -> wire.encode_message_field_always(oneof_envelope_start_command, encode_scan_start_command(m))
+    EnvelopePayloadCancelCommand(m) -> wire.encode_message_field_always(oneof_envelope_cancel_command, encode_scan_cancel_command(m))
+    EnvelopePayloadStarted(m) -> wire.encode_message_field_always(oneof_envelope_started, encode_scan_started_event(m))
+    EnvelopePayloadProgress(m) -> wire.encode_message_field_always(oneof_envelope_progress, encode_scan_progress_event(m))
+    EnvelopePayloadFinding(m) -> wire.encode_message_field_always(oneof_envelope_finding, encode_scan_finding_event(m))
+    EnvelopePayloadLog(m) -> wire.encode_message_field_always(oneof_envelope_log, encode_scan_log_event(m))
+    EnvelopePayloadCompleted(m) -> wire.encode_message_field_always(oneof_envelope_completed, encode_scan_completed_event(m))
+    EnvelopePayloadFailed(m) -> wire.encode_message_field_always(oneof_envelope_failed, encode_scan_failed_event(m))
   }
 }
 
@@ -192,7 +192,7 @@ type EnvelopeAcc {
     event_id: String,
     scan_id: String,
     timestamp_ms: Int,
-    payload: Result(Payload, Nil),
+    payload: Result(EnvelopePayload, Nil),
   )
 }
 
@@ -236,19 +236,19 @@ fn envelope_field_handler(
     n if n == field_envelope_event_id ->
       case wire.decode_len_delimited(rest) {
         Error(e) -> Error(e)
-        Ok(#(bytes, r)) ->
-          case wire.decode_string(bytes) {
+        Ok(#(v, r)) ->
+          case wire.decode_string(v) {
             Error(e) -> Error(e)
-            Ok(s) -> Ok(#(EnvelopeAcc(..acc, event_id: s), r))
+            Ok(v) -> Ok(#(EnvelopeAcc(..acc, event_id: v), r))
           }
       }
     n if n == field_envelope_scan_id ->
       case wire.decode_len_delimited(rest) {
         Error(e) -> Error(e)
-        Ok(#(bytes, r)) ->
-          case wire.decode_string(bytes) {
+        Ok(#(v, r)) ->
+          case wire.decode_string(v) {
             Error(e) -> Error(e)
-            Ok(s) -> Ok(#(EnvelopeAcc(..acc, scan_id: s), r))
+            Ok(v) -> Ok(#(EnvelopeAcc(..acc, scan_id: v), r))
           }
       }
     n if n == field_envelope_timestamp_ms ->
@@ -259,73 +259,73 @@ fn envelope_field_handler(
     n if n == oneof_envelope_start_command ->
       case wire.decode_len_delimited(rest) {
         Error(e) -> Error(e)
-        Ok(#(body, r)) ->
-          case decode_scan_start_command(body) {
+        Ok(#(v, r)) ->
+          case decode_scan_start_command(v) {
             Error(e) -> Error(e)
-            Ok(m) -> Ok(#(EnvelopeAcc(..acc, payload: Ok(StartCommand(m))), r))
+            Ok(v) -> Ok(#(EnvelopeAcc(..acc, payload: Ok(EnvelopePayloadStartCommand(v))), r))
           }
       }
     n if n == oneof_envelope_cancel_command ->
       case wire.decode_len_delimited(rest) {
         Error(e) -> Error(e)
-        Ok(#(body, r)) ->
-          case decode_scan_cancel_command(body) {
+        Ok(#(v, r)) ->
+          case decode_scan_cancel_command(v) {
             Error(e) -> Error(e)
-            Ok(m) -> Ok(#(EnvelopeAcc(..acc, payload: Ok(CancelCommand(m))), r))
+            Ok(v) -> Ok(#(EnvelopeAcc(..acc, payload: Ok(EnvelopePayloadCancelCommand(v))), r))
           }
       }
     n if n == oneof_envelope_started ->
       case wire.decode_len_delimited(rest) {
         Error(e) -> Error(e)
-        Ok(#(body, r)) ->
-          case decode_scan_started_event(body) {
+        Ok(#(v, r)) ->
+          case decode_scan_started_event(v) {
             Error(e) -> Error(e)
-            Ok(m) -> Ok(#(EnvelopeAcc(..acc, payload: Ok(Started(m))), r))
+            Ok(v) -> Ok(#(EnvelopeAcc(..acc, payload: Ok(EnvelopePayloadStarted(v))), r))
           }
       }
     n if n == oneof_envelope_progress ->
       case wire.decode_len_delimited(rest) {
         Error(e) -> Error(e)
-        Ok(#(body, r)) ->
-          case decode_scan_progress_event(body) {
+        Ok(#(v, r)) ->
+          case decode_scan_progress_event(v) {
             Error(e) -> Error(e)
-            Ok(m) -> Ok(#(EnvelopeAcc(..acc, payload: Ok(Progress(m))), r))
+            Ok(v) -> Ok(#(EnvelopeAcc(..acc, payload: Ok(EnvelopePayloadProgress(v))), r))
           }
       }
     n if n == oneof_envelope_finding ->
       case wire.decode_len_delimited(rest) {
         Error(e) -> Error(e)
-        Ok(#(body, r)) ->
-          case decode_scan_finding_event(body) {
+        Ok(#(v, r)) ->
+          case decode_scan_finding_event(v) {
             Error(e) -> Error(e)
-            Ok(m) -> Ok(#(EnvelopeAcc(..acc, payload: Ok(Finding(m))), r))
+            Ok(v) -> Ok(#(EnvelopeAcc(..acc, payload: Ok(EnvelopePayloadFinding(v))), r))
           }
       }
     n if n == oneof_envelope_log ->
       case wire.decode_len_delimited(rest) {
         Error(e) -> Error(e)
-        Ok(#(body, r)) ->
-          case decode_scan_log_event(body) {
+        Ok(#(v, r)) ->
+          case decode_scan_log_event(v) {
             Error(e) -> Error(e)
-            Ok(m) -> Ok(#(EnvelopeAcc(..acc, payload: Ok(Log(m))), r))
+            Ok(v) -> Ok(#(EnvelopeAcc(..acc, payload: Ok(EnvelopePayloadLog(v))), r))
           }
       }
     n if n == oneof_envelope_completed ->
       case wire.decode_len_delimited(rest) {
         Error(e) -> Error(e)
-        Ok(#(body, r)) ->
-          case decode_scan_completed_event(body) {
+        Ok(#(v, r)) ->
+          case decode_scan_completed_event(v) {
             Error(e) -> Error(e)
-            Ok(m) -> Ok(#(EnvelopeAcc(..acc, payload: Ok(Completed(m))), r))
+            Ok(v) -> Ok(#(EnvelopeAcc(..acc, payload: Ok(EnvelopePayloadCompleted(v))), r))
           }
       }
     n if n == oneof_envelope_failed ->
       case wire.decode_len_delimited(rest) {
         Error(e) -> Error(e)
-        Ok(#(body, r)) ->
-          case decode_scan_failed_event(body) {
+        Ok(#(v, r)) ->
+          case decode_scan_failed_event(v) {
             Error(e) -> Error(e)
-            Ok(m) -> Ok(#(EnvelopeAcc(..acc, payload: Ok(Failed(m))), r))
+            Ok(v) -> Ok(#(EnvelopeAcc(..acc, payload: Ok(EnvelopePayloadFailed(v))), r))
           }
       }
     _ ->
@@ -404,10 +404,10 @@ fn scan_start_command_field_handler(
     n if n == field_scan_start_command_target ->
       case wire.decode_len_delimited(rest) {
         Error(e) -> Error(e)
-        Ok(#(bytes, r)) ->
-          case wire.decode_string(bytes) {
+        Ok(#(v, r)) ->
+          case wire.decode_string(v) {
             Error(e) -> Error(e)
-            Ok(s) -> Ok(#(ScanStartCommandAcc(..acc, target: s), r))
+            Ok(v) -> Ok(#(ScanStartCommandAcc(..acc, target: v), r))
           }
       }
     n if n == field_scan_start_command_mode ->
@@ -416,7 +416,7 @@ fn scan_start_command_field_handler(
         Ok(#(v, r)) ->
           case scan_mode_from_int(v) {
             Error(e) -> Error(e)
-            Ok(ev) -> Ok(#(ScanStartCommandAcc(..acc, mode: ev), r))
+            Ok(v) -> Ok(#(ScanStartCommandAcc(..acc, mode: v), r))
           }
       }
     n if n == field_scan_start_command_tools ->
@@ -431,19 +431,19 @@ fn scan_start_command_field_handler(
     n if n == field_scan_start_command_project_id ->
       case wire.decode_len_delimited(rest) {
         Error(e) -> Error(e)
-        Ok(#(bytes, r)) ->
-          case wire.decode_string(bytes) {
+        Ok(#(v, r)) ->
+          case wire.decode_string(v) {
             Error(e) -> Error(e)
-            Ok(s) -> Ok(#(ScanStartCommandAcc(..acc, project_id: s), r))
+            Ok(v) -> Ok(#(ScanStartCommandAcc(..acc, project_id: v), r))
           }
       }
     n if n == field_scan_start_command_org_id ->
       case wire.decode_len_delimited(rest) {
         Error(e) -> Error(e)
-        Ok(#(bytes, r)) ->
-          case wire.decode_string(bytes) {
+        Ok(#(v, r)) ->
+          case wire.decode_string(v) {
             Error(e) -> Error(e)
-            Ok(s) -> Ok(#(ScanStartCommandAcc(..acc, org_id: s), r))
+            Ok(v) -> Ok(#(ScanStartCommandAcc(..acc, org_id: v), r))
           }
       }
     _ ->
@@ -536,10 +536,10 @@ fn scan_progress_event_field_handler(
     n if n == field_scan_progress_event_phase ->
       case wire.decode_len_delimited(rest) {
         Error(e) -> Error(e)
-        Ok(#(bytes, r)) ->
-          case wire.decode_string(bytes) {
+        Ok(#(v, r)) ->
+          case wire.decode_string(v) {
             Error(e) -> Error(e)
-            Ok(s) -> Ok(#(ScanProgressEventAcc(..acc, phase: s), r))
+            Ok(v) -> Ok(#(ScanProgressEventAcc(..acc, phase: v), r))
           }
       }
     n if n == field_scan_progress_event_progress ->
@@ -550,10 +550,10 @@ fn scan_progress_event_field_handler(
     n if n == field_scan_progress_event_message ->
       case wire.decode_len_delimited(rest) {
         Error(e) -> Error(e)
-        Ok(#(bytes, r)) ->
-          case wire.decode_string(bytes) {
+        Ok(#(v, r)) ->
+          case wire.decode_string(v) {
             Error(e) -> Error(e)
-            Ok(s) -> Ok(#(ScanProgressEventAcc(..acc, message: s), r))
+            Ok(v) -> Ok(#(ScanProgressEventAcc(..acc, message: v), r))
           }
       }
     _ ->
@@ -647,61 +647,61 @@ fn scan_finding_event_field_handler(
         Ok(#(v, r)) ->
           case severity_from_int(v) {
             Error(e) -> Error(e)
-            Ok(ev) -> Ok(#(ScanFindingEventAcc(..acc, severity: ev), r))
+            Ok(v) -> Ok(#(ScanFindingEventAcc(..acc, severity: v), r))
           }
       }
     n if n == field_scan_finding_event_category ->
       case wire.decode_len_delimited(rest) {
         Error(e) -> Error(e)
-        Ok(#(bytes, r)) ->
-          case wire.decode_string(bytes) {
+        Ok(#(v, r)) ->
+          case wire.decode_string(v) {
             Error(e) -> Error(e)
-            Ok(s) -> Ok(#(ScanFindingEventAcc(..acc, category: s), r))
+            Ok(v) -> Ok(#(ScanFindingEventAcc(..acc, category: v), r))
           }
       }
     n if n == field_scan_finding_event_title ->
       case wire.decode_len_delimited(rest) {
         Error(e) -> Error(e)
-        Ok(#(bytes, r)) ->
-          case wire.decode_string(bytes) {
+        Ok(#(v, r)) ->
+          case wire.decode_string(v) {
             Error(e) -> Error(e)
-            Ok(s) -> Ok(#(ScanFindingEventAcc(..acc, title: s), r))
+            Ok(v) -> Ok(#(ScanFindingEventAcc(..acc, title: v), r))
           }
       }
     n if n == field_scan_finding_event_description ->
       case wire.decode_len_delimited(rest) {
         Error(e) -> Error(e)
-        Ok(#(bytes, r)) ->
-          case wire.decode_string(bytes) {
+        Ok(#(v, r)) ->
+          case wire.decode_string(v) {
             Error(e) -> Error(e)
-            Ok(s) -> Ok(#(ScanFindingEventAcc(..acc, description: s), r))
+            Ok(v) -> Ok(#(ScanFindingEventAcc(..acc, description: v), r))
           }
       }
     n if n == field_scan_finding_event_evidence ->
       case wire.decode_len_delimited(rest) {
         Error(e) -> Error(e)
-        Ok(#(bytes, r)) ->
-          case wire.decode_string(bytes) {
+        Ok(#(v, r)) ->
+          case wire.decode_string(v) {
             Error(e) -> Error(e)
-            Ok(s) -> Ok(#(ScanFindingEventAcc(..acc, evidence: s), r))
+            Ok(v) -> Ok(#(ScanFindingEventAcc(..acc, evidence: v), r))
           }
       }
     n if n == field_scan_finding_event_endpoint ->
       case wire.decode_len_delimited(rest) {
         Error(e) -> Error(e)
-        Ok(#(bytes, r)) ->
-          case wire.decode_string(bytes) {
+        Ok(#(v, r)) ->
+          case wire.decode_string(v) {
             Error(e) -> Error(e)
-            Ok(s) -> Ok(#(ScanFindingEventAcc(..acc, endpoint: s), r))
+            Ok(v) -> Ok(#(ScanFindingEventAcc(..acc, endpoint: v), r))
           }
       }
     n if n == field_scan_finding_event_tool ->
       case wire.decode_len_delimited(rest) {
         Error(e) -> Error(e)
-        Ok(#(bytes, r)) ->
-          case wire.decode_string(bytes) {
+        Ok(#(v, r)) ->
+          case wire.decode_string(v) {
             Error(e) -> Error(e)
-            Ok(s) -> Ok(#(ScanFindingEventAcc(..acc, tool: s), r))
+            Ok(v) -> Ok(#(ScanFindingEventAcc(..acc, tool: v), r))
           }
       }
     _ ->
@@ -771,25 +771,25 @@ fn scan_log_event_field_handler(
         Ok(#(v, r)) ->
           case log_level_from_int(v) {
             Error(e) -> Error(e)
-            Ok(ev) -> Ok(#(ScanLogEventAcc(..acc, level: ev), r))
+            Ok(v) -> Ok(#(ScanLogEventAcc(..acc, level: v), r))
           }
       }
     n if n == field_scan_log_event_message ->
       case wire.decode_len_delimited(rest) {
         Error(e) -> Error(e)
-        Ok(#(bytes, r)) ->
-          case wire.decode_string(bytes) {
+        Ok(#(v, r)) ->
+          case wire.decode_string(v) {
             Error(e) -> Error(e)
-            Ok(s) -> Ok(#(ScanLogEventAcc(..acc, message: s), r))
+            Ok(v) -> Ok(#(ScanLogEventAcc(..acc, message: v), r))
           }
       }
     n if n == field_scan_log_event_phase ->
       case wire.decode_len_delimited(rest) {
         Error(e) -> Error(e)
-        Ok(#(bytes, r)) ->
-          case wire.decode_string(bytes) {
+        Ok(#(v, r)) ->
+          case wire.decode_string(v) {
             Error(e) -> Error(e)
-            Ok(s) -> Ok(#(ScanLogEventAcc(..acc, phase: s), r))
+            Ok(v) -> Ok(#(ScanLogEventAcc(..acc, phase: v), r))
           }
       }
     _ ->
@@ -915,19 +915,19 @@ fn scan_failed_event_field_handler(
     n if n == field_scan_failed_event_reason ->
       case wire.decode_len_delimited(rest) {
         Error(e) -> Error(e)
-        Ok(#(bytes, r)) ->
-          case wire.decode_string(bytes) {
+        Ok(#(v, r)) ->
+          case wire.decode_string(v) {
             Error(e) -> Error(e)
-            Ok(s) -> Ok(#(ScanFailedEventAcc(..acc, reason: s), r))
+            Ok(v) -> Ok(#(ScanFailedEventAcc(..acc, reason: v), r))
           }
       }
     n if n == field_scan_failed_event_phase ->
       case wire.decode_len_delimited(rest) {
         Error(e) -> Error(e)
-        Ok(#(bytes, r)) ->
-          case wire.decode_string(bytes) {
+        Ok(#(v, r)) ->
+          case wire.decode_string(v) {
             Error(e) -> Error(e)
-            Ok(s) -> Ok(#(ScanFailedEventAcc(..acc, phase: s), r))
+            Ok(v) -> Ok(#(ScanFailedEventAcc(..acc, phase: v), r))
           }
       }
     _ ->

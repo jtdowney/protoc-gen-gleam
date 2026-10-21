@@ -23,7 +23,7 @@ func generateDecoder(ctx *genContext, msg *protogen.Message, typeName string, on
 
 	// Accumulator type.
 	accName := typeName + "Acc"
-	generateAccType(ctx, accName, regular, oneofs)
+	generateAccType(ctx, typeName, accName, regular, oneofs)
 
 	// Decoder function.
 	ctx.w.P("pub fn %s(buf: BitArray) -> Result(%s, wire.DecodeError) {", fnName, typeName)
@@ -94,7 +94,7 @@ func generateDecoder(ctx *genContext, msg *protogen.Message, typeName string, on
 	}
 }
 
-func generateAccType(ctx *genContext, accName string, regular []*protogen.Field, oneofs []oneofInfo) {
+func generateAccType(ctx *genContext, typeName, accName string, regular []*protogen.Field, oneofs []oneofInfo) {
 	ctx.w.P("type %s {", accName)
 	ctx.w.P("  %s(", accName)
 	var fields []string
@@ -102,7 +102,7 @@ func generateAccType(ctx *genContext, accName string, regular []*protogen.Field,
 		fields = append(fields, fmt.Sprintf("    %s: %s", gleamfmt.FieldName(string(f.Desc.Name())), gleamAccFieldType(ctx, f)))
 	}
 	for _, oo := range oneofs {
-		ooType := gleamfmt.ToPascalCase(string(oo.Desc.Name()))
+		ooType := oneofTypeName(typeName, oo)
 		fields = append(fields, fmt.Sprintf("    %s: Result(%s, Nil)", gleamfmt.FieldName(string(oo.Desc.Name())), ooType))
 	}
 	ctx.w.P("%s,", strings.Join(fields, ",\n"))
@@ -147,7 +147,7 @@ func generateFieldHandler(ctx *genContext, typeName, accName string, regular []*
 		for _, f := range oo.Fields {
 			constName := oneofConstName(typeName, f)
 			ctx.w.P("    n if n == %s ->", constName)
-			generateOneofFieldDecode(ctx, f, oo, accName)
+			generateOneofFieldDecode(ctx, typeName, f, oo, accName)
 		}
 	}
 
@@ -178,177 +178,67 @@ func generateFieldDecode(ctx *genContext, f *protogen.Field, fieldName, accName 
 }
 
 func generateScalarDecode(ctx *genContext, f *protogen.Field, fieldName, accName string) {
-	switch f.Desc.Kind() {
-	case protoreflect.StringKind:
-		ctx.w.P("      case wire.decode_len_delimited(rest) {")
-		ctx.w.P("        Error(e) -> Error(e)")
-		ctx.w.P("        Ok(#(bytes, r)) ->")
-		ctx.w.P("          case wire.decode_string(bytes) {")
-		ctx.w.P("            Error(e) -> Error(e)")
-		ctx.w.P("            Ok(s) -> Ok(#(%s(..acc, %s: s), r))", accName, fieldName)
-		ctx.w.P("          }")
-		ctx.w.P("      }")
-
-	case protoreflect.BoolKind:
-		ctx.w.P("      case wire.decode_varint(rest) {")
-		ctx.w.P("        Error(e) -> Error(e)")
-		ctx.w.P("        Ok(#(v, r)) -> Ok(#(%s(..acc, %s: v != 0), r))", accName, fieldName)
-		ctx.w.P("      }")
-
-	case protoreflect.Int32Kind, protoreflect.Int64Kind,
-		protoreflect.Uint32Kind, protoreflect.Uint64Kind:
-		ctx.w.P("      case wire.decode_varint(rest) {")
-		ctx.w.P("        Error(e) -> Error(e)")
-		ctx.w.P("        Ok(#(v, r)) -> Ok(#(%s(..acc, %s: v), r))", accName, fieldName)
-		ctx.w.P("      }")
-
-	case protoreflect.Sint32Kind, protoreflect.Sint64Kind:
-		ctx.w.P("      case wire.decode_varint(rest) {")
-		ctx.w.P("        Error(e) -> Error(e)")
-		ctx.w.P("        Ok(#(v, r)) -> Ok(#(%s(..acc, %s: wire.zigzag_decode(v)), r))", accName, fieldName)
-		ctx.w.P("      }")
-
-	case protoreflect.Fixed32Kind:
-		ctx.w.P("      case wire.decode_fixed32(rest) {")
-		ctx.w.P("        Error(e) -> Error(e)")
-		ctx.w.P("        Ok(#(v, r)) -> Ok(#(%s(..acc, %s: v), r))", accName, fieldName)
-		ctx.w.P("      }")
-
-	case protoreflect.Fixed64Kind:
-		ctx.w.P("      case wire.decode_fixed64(rest) {")
-		ctx.w.P("        Error(e) -> Error(e)")
-		ctx.w.P("        Ok(#(v, r)) -> Ok(#(%s(..acc, %s: v), r))", accName, fieldName)
-		ctx.w.P("      }")
-
-	case protoreflect.Sfixed32Kind:
-		ctx.w.P("      case wire.decode_sfixed32(rest) {")
-		ctx.w.P("        Error(e) -> Error(e)")
-		ctx.w.P("        Ok(#(v, r)) -> Ok(#(%s(..acc, %s: v), r))", accName, fieldName)
-		ctx.w.P("      }")
-
-	case protoreflect.Sfixed64Kind:
-		ctx.w.P("      case wire.decode_sfixed64(rest) {")
-		ctx.w.P("        Error(e) -> Error(e)")
-		ctx.w.P("        Ok(#(v, r)) -> Ok(#(%s(..acc, %s: v), r))", accName, fieldName)
-		ctx.w.P("      }")
-
-	case protoreflect.FloatKind:
-		ctx.w.P("      case wire.decode_float32(rest) {")
-		ctx.w.P("        Error(e) -> Error(e)")
-		ctx.w.P("        Ok(#(v, r)) -> Ok(#(%s(..acc, %s: v), r))", accName, fieldName)
-		ctx.w.P("      }")
-
-	case protoreflect.DoubleKind:
-		ctx.w.P("      case wire.decode_float64(rest) {")
-		ctx.w.P("        Error(e) -> Error(e)")
-		ctx.w.P("        Ok(#(v, r)) -> Ok(#(%s(..acc, %s: v), r))", accName, fieldName)
-		ctx.w.P("      }")
-
-	case protoreflect.BytesKind:
-		ctx.w.P("      case wire.decode_len_delimited(rest) {")
-		ctx.w.P("        Error(e) -> Error(e)")
-		ctx.w.P("        Ok(#(bytes, r)) -> Ok(#(%s(..acc, %s: bytes), r))", accName, fieldName)
-		ctx.w.P("      }")
-
-	case protoreflect.EnumKind:
-		prefix := enumFnPrefix(ctx, f)
-		ctx.w.P("      case wire.decode_varint(rest) {")
-		ctx.w.P("        Error(e) -> Error(e)")
-		ctx.w.P("        Ok(#(v, r)) ->")
-		ctx.w.P("          case %s_from_int(v) {", prefix)
-		ctx.w.P("            Error(e) -> Error(e)")
-		ctx.w.P("            Ok(ev) -> Ok(#(%s(..acc, %s: ev), r))", accName, fieldName)
-		ctx.w.P("          }")
-		ctx.w.P("      }")
-
-	case protoreflect.MessageKind:
-		dec := decoderFnName(ctx, f.Message)
-		ctx.w.P("      case wire.decode_len_delimited(rest) {")
-		ctx.w.P("        Error(e) -> Error(e)")
-		ctx.w.P("        Ok(#(body, r)) ->")
-		ctx.w.P("          case %s(body) {", dec)
-		ctx.w.P("            Error(e) -> Error(e)")
-		ctx.w.P("            Ok(m) -> Ok(#(%s(..acc, %s: m), r))", accName, fieldName)
-		ctx.w.P("          }")
-		ctx.w.P("      }")
-
-	default:
-		ctx.w.P("      case wire.skip_field(rest, wire.wire_len) {")
-		ctx.w.P("        Ok(r) -> Ok(#(acc, r))")
-		ctx.w.P("        Error(e) -> Error(e)")
-		ctx.w.P("      }")
-	}
+	generateValueDecode(ctx, f, fieldName, accName, "%s")
 }
 
+// generateOptionalDecode wraps the decoded value in Ok(), since a field on
+// the wire is set.
 func generateOptionalDecode(ctx *genContext, f *protogen.Field, fieldName, accName string) {
-	// Optional fields wrap value in Ok() on decode.
+	generateValueDecode(ctx, f, fieldName, accName, "Ok(%s)")
+}
+
+// generateValueDecode emits a case arm body that decodes one singular value
+// of f's kind from `rest` and stores wrap(value) in the accumulator field.
+func generateValueDecode(ctx *genContext, f *protogen.Field, fieldName, accName, wrap string) {
+	set := func(v string) string {
+		return fmt.Sprintf("Ok(#(%s(..acc, %s: %s), r))", accName, fieldName, fmt.Sprintf(wrap, v))
+	}
+	// Kinds read with one wire call, then a pure conversion of v.
+	simple := map[protoreflect.Kind][2]string{
+		protoreflect.BoolKind:     {"wire.decode_varint", "v != 0"},
+		protoreflect.Int32Kind:    {"wire.decode_varint", "v"},
+		protoreflect.Int64Kind:    {"wire.decode_varint", "v"},
+		protoreflect.Uint32Kind:   {"wire.decode_varint", "v"},
+		protoreflect.Uint64Kind:   {"wire.decode_varint", "v"},
+		protoreflect.Sint32Kind:   {"wire.decode_varint", "wire.zigzag_decode(v)"},
+		protoreflect.Sint64Kind:   {"wire.decode_varint", "wire.zigzag_decode(v)"},
+		protoreflect.Fixed32Kind:  {"wire.decode_fixed32", "v"},
+		protoreflect.Fixed64Kind:  {"wire.decode_fixed64", "v"},
+		protoreflect.Sfixed32Kind: {"wire.decode_sfixed32", "v"},
+		protoreflect.Sfixed64Kind: {"wire.decode_sfixed64", "v"},
+		protoreflect.FloatKind:    {"wire.decode_float32", "v"},
+		protoreflect.DoubleKind:   {"wire.decode_float64", "v"},
+		protoreflect.BytesKind:    {"wire.decode_len_delimited", "v"},
+	}
+	if s, ok := simple[f.Desc.Kind()]; ok {
+		ctx.w.P("      case %s(rest) {", s[0])
+		ctx.w.P("        Error(e) -> Error(e)")
+		ctx.w.P("        Ok(#(v, r)) -> %s", set(s[1]))
+		ctx.w.P("      }")
+		return
+	}
+
+	// Kinds whose conversion can fail.
+	var reader, convert string
 	switch f.Desc.Kind() {
 	case protoreflect.StringKind:
-		ctx.w.P("      case wire.decode_len_delimited(rest) {")
-		ctx.w.P("        Error(e) -> Error(e)")
-		ctx.w.P("        Ok(#(bytes, r)) ->")
-		ctx.w.P("          case wire.decode_string(bytes) {")
-		ctx.w.P("            Error(e) -> Error(e)")
-		ctx.w.P("            Ok(s) -> Ok(#(%s(..acc, %s: Ok(s)), r))", accName, fieldName)
-		ctx.w.P("          }")
-		ctx.w.P("      }")
-
-	case protoreflect.BoolKind:
-		ctx.w.P("      case wire.decode_varint(rest) {")
-		ctx.w.P("        Error(e) -> Error(e)")
-		ctx.w.P("        Ok(#(v, r)) -> Ok(#(%s(..acc, %s: Ok(v != 0)), r))", accName, fieldName)
-		ctx.w.P("      }")
-
-	case protoreflect.Int32Kind, protoreflect.Int64Kind,
-		protoreflect.Uint32Kind, protoreflect.Uint64Kind:
-		ctx.w.P("      case wire.decode_varint(rest) {")
-		ctx.w.P("        Error(e) -> Error(e)")
-		ctx.w.P("        Ok(#(v, r)) -> Ok(#(%s(..acc, %s: Ok(v)), r))", accName, fieldName)
-		ctx.w.P("      }")
-
-	case protoreflect.FloatKind:
-		ctx.w.P("      case wire.decode_float32(rest) {")
-		ctx.w.P("        Error(e) -> Error(e)")
-		ctx.w.P("        Ok(#(v, r)) -> Ok(#(%s(..acc, %s: Ok(v)), r))", accName, fieldName)
-		ctx.w.P("      }")
-
-	case protoreflect.DoubleKind:
-		ctx.w.P("      case wire.decode_float64(rest) {")
-		ctx.w.P("        Error(e) -> Error(e)")
-		ctx.w.P("        Ok(#(v, r)) -> Ok(#(%s(..acc, %s: Ok(v)), r))", accName, fieldName)
-		ctx.w.P("      }")
-
-	case protoreflect.BytesKind:
-		ctx.w.P("      case wire.decode_len_delimited(rest) {")
-		ctx.w.P("        Error(e) -> Error(e)")
-		ctx.w.P("        Ok(#(bytes, r)) -> Ok(#(%s(..acc, %s: Ok(bytes)), r))", accName, fieldName)
-		ctx.w.P("      }")
-
+		reader, convert = "wire.decode_len_delimited", "wire.decode_string"
 	case protoreflect.EnumKind:
-		prefix := enumFnPrefix(ctx, f)
-		ctx.w.P("      case wire.decode_varint(rest) {")
-		ctx.w.P("        Error(e) -> Error(e)")
-		ctx.w.P("        Ok(#(v, r)) ->")
-		ctx.w.P("          case %s_from_int(v) {", prefix)
-		ctx.w.P("            Error(e) -> Error(e)")
-		ctx.w.P("            Ok(ev) -> Ok(#(%s(..acc, %s: Ok(ev)), r))", accName, fieldName)
-		ctx.w.P("          }")
-		ctx.w.P("      }")
-
+		reader, convert = "wire.decode_varint", enumFnPrefix(ctx, f)+"_from_int"
 	case protoreflect.MessageKind:
-		dec := decoderFnName(ctx, f.Message)
-		ctx.w.P("      case wire.decode_len_delimited(rest) {")
-		ctx.w.P("        Error(e) -> Error(e)")
-		ctx.w.P("        Ok(#(body, r)) ->")
-		ctx.w.P("          case %s(body) {", dec)
-		ctx.w.P("            Error(e) -> Error(e)")
-		ctx.w.P("            Ok(m) -> Ok(#(%s(..acc, %s: Ok(m)), r))", accName, fieldName)
-		ctx.w.P("          }")
-		ctx.w.P("      }")
-
+		reader, convert = "wire.decode_len_delimited", decoderFnName(ctx, f.Message)
 	default:
-		generateScalarDecode(ctx, f, fieldName, accName)
+		// Only proto2 groups reach here, and proto2 is unsupported.
+		panic(fmt.Sprintf("unsupported field kind %s for %s", f.Desc.Kind(), f.Desc.FullName()))
 	}
+	ctx.w.P("      case %s(rest) {", reader)
+	ctx.w.P("        Error(e) -> Error(e)")
+	ctx.w.P("        Ok(#(v, r)) ->")
+	ctx.w.P("          case %s(v) {", convert)
+	ctx.w.P("            Error(e) -> Error(e)")
+	ctx.w.P("            Ok(v) -> %s", set("v"))
+	ctx.w.P("          }")
+	ctx.w.P("      }")
 }
 
 func generateRepeatedDecode(ctx *genContext, f *protogen.Field, fieldName, accName string) {
@@ -624,61 +514,10 @@ func emitMapFieldDecode(ctx *genContext, f *protogen.Field, keyVar, valVar, loop
 	}
 }
 
-func generateOneofFieldDecode(ctx *genContext, f *protogen.Field, oo oneofInfo, accName string) {
-	variantName := gleamfmt.OneofVariantName(string(f.Desc.Name()))
+func generateOneofFieldDecode(ctx *genContext, typeName string, f *protogen.Field, oo oneofInfo, accName string) {
+	variantName := oneofVariantName(typeName, oo, f)
 	ooField := gleamfmt.FieldName(string(oo.Desc.Name()))
-
-	if f.Message != nil {
-		// Message variant — decode as length-delimited sub-message.
-		dec := decoderFnName(ctx, f.Message)
-		ctx.w.P("      case wire.decode_len_delimited(rest) {")
-		ctx.w.P("        Error(e) -> Error(e)")
-		ctx.w.P("        Ok(#(body, r)) ->")
-		ctx.w.P("          case %s(body) {", dec)
-		ctx.w.P("            Error(e) -> Error(e)")
-		ctx.w.P("            Ok(m) -> Ok(#(%s(..acc, %s: Ok(%s(m))), r))", accName, ooField, variantName)
-		ctx.w.P("          }")
-		ctx.w.P("      }")
-	} else {
-		// Scalar variant — decode based on kind.
-		switch f.Desc.Kind() {
-		case protoreflect.StringKind:
-			ctx.w.P("      case wire.decode_len_delimited(rest) {")
-			ctx.w.P("        Error(e) -> Error(e)")
-			ctx.w.P("        Ok(#(bytes, r)) ->")
-			ctx.w.P("          case wire.decode_string(bytes) {")
-			ctx.w.P("            Error(e) -> Error(e)")
-			ctx.w.P("            Ok(s) -> Ok(#(%s(..acc, %s: Ok(%s(s))), r))", accName, ooField, variantName)
-			ctx.w.P("          }")
-			ctx.w.P("      }")
-		case protoreflect.BoolKind:
-			ctx.w.P("      case wire.decode_varint(rest) {")
-			ctx.w.P("        Error(e) -> Error(e)")
-			ctx.w.P("        Ok(#(v, r)) -> Ok(#(%s(..acc, %s: Ok(%s(v != 0))), r))", accName, ooField, variantName)
-			ctx.w.P("      }")
-		case protoreflect.BytesKind:
-			ctx.w.P("      case wire.decode_len_delimited(rest) {")
-			ctx.w.P("        Error(e) -> Error(e)")
-			ctx.w.P("        Ok(#(bytes, r)) -> Ok(#(%s(..acc, %s: Ok(%s(bytes))), r))", accName, ooField, variantName)
-			ctx.w.P("      }")
-		case protoreflect.FloatKind:
-			ctx.w.P("      case wire.decode_float32(rest) {")
-			ctx.w.P("        Error(e) -> Error(e)")
-			ctx.w.P("        Ok(#(v, r)) -> Ok(#(%s(..acc, %s: Ok(%s(v))), r))", accName, ooField, variantName)
-			ctx.w.P("      }")
-		case protoreflect.DoubleKind:
-			ctx.w.P("      case wire.decode_float64(rest) {")
-			ctx.w.P("        Error(e) -> Error(e)")
-			ctx.w.P("        Ok(#(v, r)) -> Ok(#(%s(..acc, %s: Ok(%s(v))), r))", accName, ooField, variantName)
-			ctx.w.P("      }")
-		default:
-			// int32, int64, uint32, uint64, enum, etc.
-			ctx.w.P("      case wire.decode_varint(rest) {")
-			ctx.w.P("        Error(e) -> Error(e)")
-			ctx.w.P("        Ok(#(v, r)) -> Ok(#(%s(..acc, %s: Ok(%s(v))), r))", accName, ooField, variantName)
-			ctx.w.P("      }")
-		}
-	}
+	generateValueDecode(ctx, f, ooField, accName, "Ok("+variantName+"(%s))")
 }
 
 func generateDecodeFieldsHelper(w *writer) {
@@ -764,17 +603,19 @@ func scalarDefault(ctx *genContext, f *protogen.Field) string {
 
 // zeroConstructor generates a zero-value constructor call for a message.
 func zeroConstructor(ctx *genContext, msg *protogen.Message) string {
-	typeName := fullMsgTypeName(msg)
+	localName := fullMsgTypeName(msg)
 
 	// Check if it's from another file.
+	qualifier := ""
 	if msg.Desc.ParentFile().Path() != ctx.file.Desc.Path() {
 		mod := gleamfmt.ModuleName(string(msg.Desc.ParentFile().Path()), ctx.packagePrefix)
 		shortMod := mod
 		if idx := strings.LastIndex(mod, "/"); idx >= 0 {
 			shortMod = mod[idx+1:]
 		}
-		typeName = shortMod + "." + typeName
+		qualifier = shortMod + "."
 	}
+	typeName := qualifier + localName
 
 	fields := regularFields(msg)
 	oneofs := collectOneofs(msg)
@@ -788,11 +629,11 @@ func zeroConstructor(ctx *genContext, msg *protogen.Message) string {
 		parts = append(parts, fmt.Sprintf("%s: %s", gleamfmt.FieldName(string(f.Desc.Name())), publicDefaultValue(ctx, f)))
 	}
 	for _, oo := range oneofs {
-		// Use the first variant with a zero-constructed inner message.
+		// Use the first variant with its zero value.
 		if len(oo.Fields) > 0 {
 			first := oo.Fields[0]
-			variantName := gleamfmt.OneofVariantName(string(first.Desc.Name()))
-			innerZero := zeroConstructor(ctx, first.Message)
+			variantName := qualifier + oneofVariantName(localName, oo, first)
+			innerZero := publicDefaultValue(ctx, first)
 			parts = append(parts, fmt.Sprintf("%s: %s(%s)", gleamfmt.FieldName(string(oo.Desc.Name())), variantName, innerZero))
 		}
 	}

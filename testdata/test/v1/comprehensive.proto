@@ -106,6 +106,15 @@ message OneofMessage {
   }
 }
 
+// Variant names that match their message types, and a oneof name shared
+// with another message, must not collide in the generated module.
+message Attachment {
+  oneof content {
+    TextContent text_content = 1;
+    ImageContent image_content = 2;
+  }
+}
+
 message TextContent {
   string body = 1;
   string format = 2;

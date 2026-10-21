@@ -89,8 +89,7 @@ fn do_decode_varint(
       case buf {
         <<byte:8, rest:bits>> -> {
           let low = int.bitwise_and(byte, 0x7F)
-          let next_acc =
-            int.bitwise_or(acc, int.bitwise_shift_left(low, shift))
+          let next_acc = int.bitwise_or(acc, int.bitwise_shift_left(low, shift))
           case int.bitwise_and(byte, 0x80) {
             0 -> Ok(#(next_acc, rest))
             _ ->
@@ -116,9 +115,7 @@ pub fn encode_tag(field_number: Int, wire_type: Int) -> BitArray {
 }
 
 /// Decode a tag into (field_number, wire_type, remaining_buffer).
-pub fn decode_tag(
-  buf: BitArray,
-) -> Result(#(Int, Int, BitArray), DecodeError) {
+pub fn decode_tag(buf: BitArray) -> Result(#(Int, Int, BitArray), DecodeError) {
   case decode_varint(buf) {
     Error(e) -> Error(e)
     Ok(#(tag, rest)) -> {
@@ -169,14 +166,19 @@ pub fn decode_len_delimited(
 pub fn encode_string_field(field_number: Int, value: String) -> BitArray {
   case string.is_empty(value) {
     True -> <<>>
-    False -> {
-      let bytes = bit_array.from_string(value)
-      <<
-        encode_tag(field_number, wire_len):bits,
-        encode_len_delimited(bytes):bits,
-      >>
-    }
+    False -> encode_string_field_always(field_number, value)
   }
+}
+
+/// Always emit, even for "". Used for fields with explicit presence.
+pub fn encode_string_field_always(
+  field_number: Int,
+  value: String,
+) -> BitArray {
+  <<
+    encode_tag(field_number, wire_len):bits,
+    encode_len_delimited(bit_array.from_string(value)):bits,
+  >>
 }
 
 /// Decode raw bytes as a UTF-8 string.
@@ -209,10 +211,7 @@ pub fn encode_repeated_strings(
 
 /// Encode a list of integers as multiple varint entries with the same
 /// field number (unpacked encoding).
-pub fn encode_repeated_ints(
-  field_number: Int,
-  values: List(Int),
-) -> BitArray {
+pub fn encode_repeated_ints(field_number: Int, values: List(Int)) -> BitArray {
   list.fold(values, <<>>, fn(acc, v) {
     <<
       acc:bits,
@@ -247,8 +246,7 @@ pub fn decode_packed_fixed32(
 ) -> Result(List(Int), DecodeError) {
   case buf {
     <<>> -> Ok(acc)
-    <<v:little-size(32), rest:bits>> ->
-      decode_packed_fixed32(rest, [v, ..acc])
+    <<v:little-size(32), rest:bits>> -> decode_packed_fixed32(rest, [v, ..acc])
     _ -> Error(Truncated)
   }
 }
@@ -260,8 +258,7 @@ pub fn decode_packed_fixed64(
 ) -> Result(List(Int), DecodeError) {
   case buf {
     <<>> -> Ok(acc)
-    <<v:little-size(64), rest:bits>> ->
-      decode_packed_fixed64(rest, [v, ..acc])
+    <<v:little-size(64), rest:bits>> -> decode_packed_fixed64(rest, [v, ..acc])
     _ -> Error(Truncated)
   }
 }
@@ -323,7 +320,7 @@ pub fn encode_int_field(field_number: Int, value: Int) -> BitArray {
   }
 }
 
-/// Always emit, even for zero. Rarely needed.
+/// Always emit, even for zero. Used for fields with explicit presence.
 pub fn encode_int_field_always(field_number: Int, value: Int) -> BitArray {
   <<encode_tag(field_number, wire_varint):bits, encode_varint(value):bits>>
 }
@@ -334,11 +331,17 @@ pub fn encode_int_field_always(field_number: Int, value: Int) -> BitArray {
 pub fn encode_bool_field(field_number: Int, value: Bool) -> BitArray {
   case value {
     False -> <<>>
-    True -> <<
-      encode_tag(field_number, wire_varint):bits,
-      encode_varint(1):bits,
-    >>
+    True -> encode_bool_field_always(field_number, value)
   }
+}
+
+/// Always emit, even for False. Used for fields with explicit presence.
+pub fn encode_bool_field_always(field_number: Int, value: Bool) -> BitArray {
+  let v = case value {
+    True -> 1
+    False -> 0
+  }
+  <<encode_tag(field_number, wire_varint):bits, encode_varint(v):bits>>
 }
 
 // --- Float (32-bit IEEE 754, little-endian) ----------------------------
@@ -347,15 +350,19 @@ pub fn encode_bool_field(field_number: Int, value: Bool) -> BitArray {
 pub fn encode_float_field(field_number: Int, value: Float) -> BitArray {
   case value == 0.0 {
     True -> <<>>
-    False -> <<
-      encode_tag(field_number, wire_i32):bits,
-      value:float-little-size(32),
-    >>
+    False -> encode_float_field_always(field_number, value)
   }
 }
 
+/// Always emit, even for 0.0. Used for fields with explicit presence.
+pub fn encode_float_field_always(field_number: Int, value: Float) -> BitArray {
+  <<encode_tag(field_number, wire_i32):bits, value:float-little-size(32)>>
+}
+
 /// Decode a 32-bit little-endian float.
-pub fn decode_float32(buf: BitArray) -> Result(#(Float, BitArray), DecodeError) {
+pub fn decode_float32(
+  buf: BitArray,
+) -> Result(#(Float, BitArray), DecodeError) {
   case buf {
     <<v:float-little-size(32), rest:bits>> -> Ok(#(v, rest))
     _ -> Error(Truncated)
@@ -368,15 +375,19 @@ pub fn decode_float32(buf: BitArray) -> Result(#(Float, BitArray), DecodeError) 
 pub fn encode_double_field(field_number: Int, value: Float) -> BitArray {
   case value == 0.0 {
     True -> <<>>
-    False -> <<
-      encode_tag(field_number, wire_i64):bits,
-      value:float-little-size(64),
-    >>
+    False -> encode_double_field_always(field_number, value)
   }
 }
 
+/// Always emit, even for 0.0. Used for fields with explicit presence.
+pub fn encode_double_field_always(field_number: Int, value: Float) -> BitArray {
+  <<encode_tag(field_number, wire_i64):bits, value:float-little-size(64)>>
+}
+
 /// Decode a 64-bit little-endian double.
-pub fn decode_float64(buf: BitArray) -> Result(#(Float, BitArray), DecodeError) {
+pub fn decode_float64(
+  buf: BitArray,
+) -> Result(#(Float, BitArray), DecodeError) {
   case buf {
     <<v:float-little-size(64), rest:bits>> -> Ok(#(v, rest))
     _ -> Error(Truncated)
@@ -389,11 +400,16 @@ pub fn decode_float64(buf: BitArray) -> Result(#(Float, BitArray), DecodeError) 
 pub fn encode_bytes_field(field_number: Int, value: BitArray) -> BitArray {
   case bit_array.byte_size(value) == 0 {
     True -> <<>>
-    False -> <<
-      encode_tag(field_number, wire_len):bits,
-      encode_len_delimited(value):bits,
-    >>
+    False -> encode_bytes_field_always(field_number, value)
   }
+}
+
+/// Always emit, even when empty. Used for fields with explicit presence.
+pub fn encode_bytes_field_always(
+  field_number: Int,
+  value: BitArray,
+) -> BitArray {
+  <<encode_tag(field_number, wire_len):bits, encode_len_delimited(value):bits>>
 }
 
 // --- Embedded message field --------------------------------------------
@@ -482,11 +498,16 @@ pub fn zigzag_decode(value: Int) -> Int {
 pub fn encode_sint_field(field_number: Int, value: Int) -> BitArray {
   case value == 0 {
     True -> <<>>
-    False -> <<
-      encode_tag(field_number, wire_varint):bits,
-      encode_varint(zigzag_encode(value)):bits,
-    >>
+    False -> encode_sint_field_always(field_number, value)
   }
+}
+
+/// Always emit, even for zero. Used for fields with explicit presence.
+pub fn encode_sint_field_always(field_number: Int, value: Int) -> BitArray {
+  <<
+    encode_tag(field_number, wire_varint):bits,
+    encode_varint(zigzag_encode(value)):bits,
+  >>
 }
 
 // --- Fixed-width integers -----------------------------------------------
@@ -495,11 +516,13 @@ pub fn encode_sint_field(field_number: Int, value: Int) -> BitArray {
 pub fn encode_fixed32_field(field_number: Int, value: Int) -> BitArray {
   case value == 0 {
     True -> <<>>
-    False -> <<
-      encode_tag(field_number, wire_i32):bits,
-      value:little-size(32),
-    >>
+    False -> encode_fixed32_field_always(field_number, value)
   }
+}
+
+/// Always emit, even for zero. Used for fields with explicit presence.
+pub fn encode_fixed32_field_always(field_number: Int, value: Int) -> BitArray {
+  <<encode_tag(field_number, wire_i32):bits, value:little-size(32)>>
 }
 
 /// Decode a fixed32 (4 bytes, unsigned, little-endian).
@@ -514,11 +537,13 @@ pub fn decode_fixed32(buf: BitArray) -> Result(#(Int, BitArray), DecodeError) {
 pub fn encode_fixed64_field(field_number: Int, value: Int) -> BitArray {
   case value == 0 {
     True -> <<>>
-    False -> <<
-      encode_tag(field_number, wire_i64):bits,
-      value:little-size(64),
-    >>
+    False -> encode_fixed64_field_always(field_number, value)
   }
+}
+
+/// Always emit, even for zero. Used for fields with explicit presence.
+pub fn encode_fixed64_field_always(field_number: Int, value: Int) -> BitArray {
+  <<encode_tag(field_number, wire_i64):bits, value:little-size(64)>>
 }
 
 /// Decode a fixed64 (8 bytes, unsigned, little-endian).
@@ -534,17 +559,17 @@ pub fn decode_fixed64(buf: BitArray) -> Result(#(Int, BitArray), DecodeError) {
 pub fn encode_sfixed32_field(field_number: Int, value: Int) -> BitArray {
   case value == 0 {
     True -> <<>>
-    False -> {
-      let unsigned = case value >= 0 {
-        True -> value
-        False -> int.bitwise_and(value, 0xFFFFFFFF)
-      }
-      <<
-        encode_tag(field_number, wire_i32):bits,
-        unsigned:little-size(32),
-      >>
-    }
+    False -> encode_sfixed32_field_always(field_number, value)
   }
+}
+
+/// Always emit, even for zero. Used for fields with explicit presence.
+pub fn encode_sfixed32_field_always(field_number: Int, value: Int) -> BitArray {
+  let unsigned = case value >= 0 {
+    True -> value
+    False -> int.bitwise_and(value, 0xFFFFFFFF)
+  }
+  <<encode_tag(field_number, wire_i32):bits, unsigned:little-size(32)>>
 }
 
 /// Decode an sfixed32 (4 bytes, signed, little-endian).
@@ -566,17 +591,17 @@ pub fn decode_sfixed32(buf: BitArray) -> Result(#(Int, BitArray), DecodeError) {
 pub fn encode_sfixed64_field(field_number: Int, value: Int) -> BitArray {
   case value == 0 {
     True -> <<>>
-    False -> {
-      let unsigned = case value >= 0 {
-        True -> value
-        False -> int.bitwise_and(value, 0xFFFFFFFFFFFFFFFF)
-      }
-      <<
-        encode_tag(field_number, wire_i64):bits,
-        unsigned:little-size(64),
-      >>
-    }
+    False -> encode_sfixed64_field_always(field_number, value)
   }
+}
+
+/// Always emit, even for zero. Used for fields with explicit presence.
+pub fn encode_sfixed64_field_always(field_number: Int, value: Int) -> BitArray {
+  let unsigned = case value >= 0 {
+    True -> value
+    False -> int.bitwise_and(value, 0xFFFFFFFFFFFFFFFF)
+  }
+  <<encode_tag(field_number, wire_i64):bits, unsigned:little-size(64)>>
 }
 
 /// Decode an sfixed64 (8 bytes, signed, little-endian).
@@ -620,100 +645,15 @@ pub fn encode_map_entries(
 
 // --- Optional field helpers ---------------------------------------------
 
-/// Encode an optional string field. Omits if None.
-pub fn encode_optional_string_field(
-  field_number: Int,
-  value: Result(String, Nil),
-) -> BitArray {
-  case value {
-    Error(_) -> <<>>
-    Ok(s) -> encode_string_field(field_number, s)
-  }
-}
-
-/// Encode an optional int field. Omits if None.
-pub fn encode_optional_int_field(
-  field_number: Int,
-  value: Result(Int, Nil),
-) -> BitArray {
-  case value {
-    Error(_) -> <<>>
-    Ok(v) -> encode_int_field_always(field_number, v)
-  }
-}
-
-/// Encode an optional bool field. Omits if None.
-pub fn encode_optional_bool_field(
-  field_number: Int,
-  value: Result(Bool, Nil),
-) -> BitArray {
-  case value {
-    Error(_) -> <<>>
-    Ok(v) ->
-      case v {
-        True -> <<
-          encode_tag(field_number, wire_varint):bits,
-          encode_varint(1):bits,
-        >>
-        False -> <<
-          encode_tag(field_number, wire_varint):bits,
-          encode_varint(0):bits,
-        >>
-      }
-  }
-}
-
-/// Encode an optional float field. Omits if None.
-pub fn encode_optional_float_field(
-  field_number: Int,
-  value: Result(Float, Nil),
-) -> BitArray {
-  case value {
-    Error(_) -> <<>>
-    Ok(v) -> <<
-      encode_tag(field_number, wire_i32):bits,
-      v:float-little-size(32),
-    >>
-  }
-}
-
-/// Encode an optional double field. Omits if None.
-pub fn encode_optional_double_field(
-  field_number: Int,
-  value: Result(Float, Nil),
-) -> BitArray {
-  case value {
-    Error(_) -> <<>>
-    Ok(v) -> <<
-      encode_tag(field_number, wire_i64):bits,
-      v:float-little-size(64),
-    >>
-  }
-}
-
-/// Encode an optional bytes field. Omits if None.
-pub fn encode_optional_bytes_field(
-  field_number: Int,
-  value: Result(BitArray, Nil),
-) -> BitArray {
-  case value {
-    Error(_) -> <<>>
-    Ok(v) -> <<
-      encode_tag(field_number, wire_len):bits,
-      encode_len_delimited(v):bits,
-    >>
-  }
-}
-
-/// Encode an optional message field. Omits if None.
-pub fn encode_optional_message_field(
-  field_number: Int,
+/// Encode an optional field with `encoder` when set; omit it when unset.
+/// The encoder must write zero values, since a set field has presence.
+pub fn encode_optional(
   value: Result(a, Nil),
   encoder: fn(a) -> BitArray,
 ) -> BitArray {
   case value {
     Error(_) -> <<>>
-    Ok(m) -> encode_message_field(field_number, encoder(m))
+    Ok(v) -> encoder(v)
   }
 }
 
@@ -724,20 +664,15 @@ pub fn error_to_string(e: DecodeError) -> String {
   case e {
     Truncated -> "truncated"
     InvalidVarint -> "invalid_varint"
-    UnsupportedWireType(w) ->
-      "unsupported_wire_type:" <> int.to_string(w)
+    UnsupportedWireType(w) -> "unsupported_wire_type:" <> int.to_string(w)
     LengthOverflow -> "length_overflow"
     InvalidUtf8 -> "invalid_utf8"
     MissingPayload -> "missing_payload"
-    UnknownEnumValue(f, v) ->
-      "unknown_enum:" <> f <> "=" <> int.to_string(v)
+    UnknownEnumValue(f, v) -> "unknown_enum:" <> f <> "=" <> int.to_string(v)
   }
 }
 
 /// Re-export for callers that don't want to import gleam/result.
-pub fn bind(
-  r: Result(a, e),
-  f: fn(a) -> Result(b, e),
-) -> Result(b, e) {
+pub fn bind(r: Result(a, e), f: fn(a) -> Result(b, e)) -> Result(b, e) {
   result.try(r, f)
 }

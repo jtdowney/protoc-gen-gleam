@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package test.v1;
+
+// Fields with explicit presence must reach the wire even when set to their
+// zero value.
+message Presence {
+  optional string note = 1;
+  optional sint32 delta = 2;
+  optional Marker marker = 3;
+  oneof value {
+    string text = 4;
+    int32 count = 5;
+  }
+}
+
+message Marker {}

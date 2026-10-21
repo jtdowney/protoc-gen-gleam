@@ -41,7 +41,7 @@ func generateEncoder(ctx *genContext, msg *protogen.Message, typeName string, on
 	}
 	for _, oo := range oneofs {
 		ooFieldName := gleamfmt.FieldName(string(oo.Desc.Name()))
-		encoderName := "encode_" + gleamfmt.ToSnakeCase(string(oo.Desc.Name())) + "_payload"
+		encoderName := oneofEncoderName(typeName, oo)
 		ctx.w.P("    %s(%s):bits,", encoderName, ooFieldName)
 	}
 	ctx.w.P("  >>")
@@ -54,23 +54,16 @@ func generateEncoder(ctx *genContext, msg *protogen.Message, typeName string, on
 }
 
 func generateOneofEncoder(ctx *genContext, oo oneofInfo, parentTypeName string) {
-	ooTypeName := gleamfmt.ToPascalCase(string(oo.Desc.Name()))
-	fnName := "encode_" + gleamfmt.ToSnakeCase(string(oo.Desc.Name())) + "_payload"
+	ooTypeName := oneofTypeName(parentTypeName, oo)
+	fnName := oneofEncoderName(parentTypeName, oo)
 
 	ctx.w.P("fn %s(p: %s) -> BitArray {", fnName, ooTypeName)
 	ctx.w.P("  case p {")
 	for _, f := range oo.Fields {
-		variantName := gleamfmt.OneofVariantName(string(f.Desc.Name()))
+		variantName := oneofVariantName(parentTypeName, oo, f)
 		constName := oneofConstName(parentTypeName, f)
-		if f.Message != nil {
-			// Message variant — encode as length-delimited sub-message.
-			msgEncoder := encoderFnName(ctx, f.Message)
-			ctx.w.P("    %s(m) -> wire.encode_message_field_always(%s, %s(m))", variantName, constName, msgEncoder)
-		} else {
-			// Scalar variant — encode directly.
-			expr := encodeScalarExpr(ctx, f, "m", constName)
-			ctx.w.P("    %s(m) -> <<%s>>", variantName, expr)
-		}
+		// A set oneof member has presence, so zero values must be written.
+		ctx.w.P("    %s(m) -> %s", variantName, encodeScalarCall(ctx, f, "m", constName, true))
 	}
 	ctx.w.P("  }")
 	ctx.w.P("}")
@@ -83,9 +76,9 @@ func encodeFieldExpr(ctx *genContext, f *protogen.Field, fieldName, constName st
 		return encodeMapExpr(ctx, f, fieldName, constName)
 	}
 
-	// Optional fields.
+	// Optional fields have presence: write the value when set, even if zero.
 	if isOptional(f) {
-		return encodeOptionalExpr(ctx, f, fieldName, constName)
+		return fmt.Sprintf("wire.encode_optional(%s, fn(v) { %s }):bits", fieldName, encodeScalarCall(ctx, f, "v", constName, true))
 	}
 
 	// Repeated fields.
@@ -94,71 +87,51 @@ func encodeFieldExpr(ctx *genContext, f *protogen.Field, fieldName, constName st
 	}
 
 	// Scalar fields.
-	return encodeScalarExpr(ctx, f, fieldName, constName)
+	return encodeScalarCall(ctx, f, fieldName, constName, false) + ":bits"
 }
 
-func encodeScalarExpr(ctx *genContext, f *protogen.Field, fieldName, constName string) string {
+// encodeScalarCall returns a call that encodes one singular value. With
+// always set it writes zero values too, for fields with explicit presence;
+// otherwise zero values are omitted (proto3 default-value rule).
+func encodeScalarCall(ctx *genContext, f *protogen.Field, fieldName, constName string, always bool) string {
+	suffix := ""
+	if always {
+		suffix = "_always"
+	}
+	var fn, value string
 	switch f.Desc.Kind() {
 	case protoreflect.StringKind:
-		return fmt.Sprintf("wire.encode_string_field(%s, %s):bits", constName, fieldName)
+		fn, value = "string", fieldName
 	case protoreflect.BoolKind:
-		return fmt.Sprintf("wire.encode_bool_field(%s, %s):bits", constName, fieldName)
+		fn, value = "bool", fieldName
 	case protoreflect.Int32Kind, protoreflect.Int64Kind,
 		protoreflect.Uint32Kind, protoreflect.Uint64Kind:
-		return fmt.Sprintf("wire.encode_int_field(%s, %s):bits", constName, fieldName)
+		fn, value = "int", fieldName
 	case protoreflect.Sint32Kind, protoreflect.Sint64Kind:
-		return fmt.Sprintf("wire.encode_sint_field(%s, %s):bits", constName, fieldName)
+		fn, value = "sint", fieldName
 	case protoreflect.Fixed32Kind:
-		return fmt.Sprintf("wire.encode_fixed32_field(%s, %s):bits", constName, fieldName)
+		fn, value = "fixed32", fieldName
 	case protoreflect.Fixed64Kind:
-		return fmt.Sprintf("wire.encode_fixed64_field(%s, %s):bits", constName, fieldName)
+		fn, value = "fixed64", fieldName
 	case protoreflect.Sfixed32Kind:
-		return fmt.Sprintf("wire.encode_sfixed32_field(%s, %s):bits", constName, fieldName)
+		fn, value = "sfixed32", fieldName
 	case protoreflect.Sfixed64Kind:
-		return fmt.Sprintf("wire.encode_sfixed64_field(%s, %s):bits", constName, fieldName)
+		fn, value = "sfixed64", fieldName
 	case protoreflect.FloatKind:
-		return fmt.Sprintf("wire.encode_float_field(%s, %s):bits", constName, fieldName)
+		fn, value = "float", fieldName
 	case protoreflect.DoubleKind:
-		return fmt.Sprintf("wire.encode_double_field(%s, %s):bits", constName, fieldName)
+		fn, value = "double", fieldName
 	case protoreflect.BytesKind:
-		return fmt.Sprintf("wire.encode_bytes_field(%s, %s):bits", constName, fieldName)
+		fn, value = "bytes", fieldName
 	case protoreflect.EnumKind:
-		prefix := enumFnPrefix(ctx, f)
-		return fmt.Sprintf("wire.encode_int_field(%s, %s_to_int(%s)):bits", constName, prefix, fieldName)
+		fn, value = "int", fmt.Sprintf("%s_to_int(%s)", enumFnPrefix(ctx, f), fieldName)
 	case protoreflect.MessageKind:
-		enc := encoderFnName(ctx, f.Message)
-		return fmt.Sprintf("wire.encode_message_field(%s, %s(%s)):bits", constName, enc, fieldName)
+		fn, value = "message", fmt.Sprintf("%s(%s)", encoderFnName(ctx, f.Message), fieldName)
 	default:
-		return fmt.Sprintf("<<>>:bits // unsupported kind: %s", f.Desc.Kind())
+		// Only proto2 groups reach here, and proto2 is unsupported.
+		panic(fmt.Sprintf("unsupported field kind %s for %s", f.Desc.Kind(), f.Desc.FullName()))
 	}
-}
-
-func encodeOptionalExpr(ctx *genContext, f *protogen.Field, fieldName, constName string) string {
-	switch f.Desc.Kind() {
-	case protoreflect.StringKind:
-		return fmt.Sprintf("wire.encode_optional_string_field(%s, %s):bits", constName, fieldName)
-	case protoreflect.BoolKind:
-		return fmt.Sprintf("wire.encode_optional_bool_field(%s, %s):bits", constName, fieldName)
-	case protoreflect.Int32Kind, protoreflect.Int64Kind,
-		protoreflect.Uint32Kind, protoreflect.Uint64Kind:
-		return fmt.Sprintf("wire.encode_optional_int_field(%s, %s):bits", constName, fieldName)
-	case protoreflect.FloatKind:
-		return fmt.Sprintf("wire.encode_optional_float_field(%s, %s):bits", constName, fieldName)
-	case protoreflect.DoubleKind:
-		return fmt.Sprintf("wire.encode_optional_double_field(%s, %s):bits", constName, fieldName)
-	case protoreflect.BytesKind:
-		return fmt.Sprintf("wire.encode_optional_bytes_field(%s, %s):bits", constName, fieldName)
-	case protoreflect.EnumKind:
-		// For optional enum, we generate a case expression inline.
-		prefix := enumFnPrefix(ctx, f)
-		return fmt.Sprintf("wire.encode_optional_int_field(%s, case %s { Ok(ev) -> Ok(%s_to_int(ev)) Error(e) -> Error(e) }):bits",
-			constName, fieldName, prefix)
-	case protoreflect.MessageKind:
-		enc := encoderFnName(ctx, f.Message)
-		return fmt.Sprintf("wire.encode_optional_message_field(%s, %s, %s):bits", constName, fieldName, enc)
-	default:
-		return fmt.Sprintf("<<>>:bits // unsupported optional kind: %s", f.Desc.Kind())
-	}
+	return fmt.Sprintf("wire.encode_%s_field%s(%s, %s)", fn, suffix, constName, value)
 }
 
 func encodeRepeatedExpr(ctx *genContext, f *protogen.Field, fieldName, constName string) string {

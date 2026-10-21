@@ -220,3 +220,68 @@ func findProjectRoot(t *testing.T) string {
 		dir = parent
 	}
 }
+
+// TestPresenceFieldsEncode checks that optional fields and oneof members set
+// to their zero value are still written, by running a Gleam program that
+// asserts the encoded bytes and the round trip.
+func TestPresenceFieldsEncode(t *testing.T) {
+	if _, err := exec.LookPath("gleam"); err != nil {
+		t.Skip("gleam not in PATH")
+	}
+
+	root := findProjectRoot(t)
+	tmpBuild := t.TempDir()
+	pluginBin := filepath.Join(tmpBuild, "protoc-gen-gleam")
+	build := exec.Command("go", "build", "-o", pluginBin, "./cmd/protoc-gen-gleam/")
+	build.Dir = root
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("building plugin: %s\n%s", err, out)
+	}
+
+	gleamDir := t.TempDir()
+	srcDir := filepath.Join(gleamDir, "src")
+	protoc := exec.Command("protoc",
+		"--plugin=protoc-gen-gleam="+pluginBin,
+		"--gleam_out="+srcDir,
+		"--gleam_opt=package_prefix=example/proto",
+		"--proto_path="+filepath.Join(root, "testdata"),
+		filepath.Join(root, "testdata", "test", "v1", "presence.proto"),
+	)
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := protoc.CombinedOutput(); err != nil {
+		t.Fatalf("protoc: %s\n%s", err, out)
+	}
+
+	gleamToml := `name = "presence_check"
+version = "0.1.0"
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+`
+	copies := map[string]string{
+		filepath.Join(root, "runtime", "src", "gleam_protobuf", "wire.gleam"): filepath.Join(srcDir, "gleam_protobuf", "wire.gleam"),
+		filepath.Join(root, "testdata", "presence_check.gleam"):               filepath.Join(srcDir, "presence_check.gleam"),
+	}
+	if err := os.WriteFile(filepath.Join(gleamDir, "gleam.toml"), []byte(gleamToml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for from, to := range copies {
+		data, err := os.ReadFile(from)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(to, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cmd := exec.Command("gleam", "run")
+	cmd.Dir = gleamDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("gleam run failed:\n%s\n%s", err, out)
+	}
+}
